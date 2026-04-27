@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+langchain
+langchain-text-splitters
+langchain-community
+langchain-chroma
+faiss-cpu
+sentence-transformers
+langchain-openai
+PyPDF2
+PyMuPDF
+python-docx

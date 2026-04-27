@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Enterprise QA Test Page</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        background: #f5f7fb;
+        color: #1e293b;
+      }
+      .container {
+        max-width: 980px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+      .muted {
+        color: #64748b;
+        font-size: 14px;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        min-width: 220px;
+      }
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+      }
+      input,
+      select,
+      textarea {
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+      }
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        background: #2563eb;
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #475569;
+      }
+      button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 8px;
+        padding: 12px;
+        min-height: 120px;
+      }
+      ul {
+        margin: 8px 0 0;
+      }
+      code {
+        background: #e2e8f0;
+        padding: 0 4px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Enterprise QA 前端测试页</h1>
+        <div class="muted">用于快速测试建库、普通问答、流式问答。</div>
+      </div>
+
+      <div class="card">
+        <h2>1) 建立向量库</h2>
+        <div class="row">
+          <label class="field">
+            文档目录
+            <input id="docsDir" value="knowledge_base" />
+          </label>
+          <label class="field">
+            向量库类型
+            <select id="ingestStoreType">
+              <option value="chroma" selected>chroma</option>
+              <option value="faiss">faiss</option>
+            </select>
+          </label>
+        </div>
+        <div style="margin-top: 12px">
+          <button id="ingestBtn">开始建库</button>
+        </div>
+        <pre id="ingestResult"></pre>
+      </div>
+
+      <div class="card">
+        <h2>2) 问答参数</h2>
+        <div class="row">
+          <label class="field">
+            向量库类型
+            <select id="askStoreType">
+              <option value="chroma" selected>chroma</option>
+              <option value="faiss">faiss</option>
+            </select>
+          </label>
+          <label class="field">
+            top_k
+            <input id="topK" type="number" min="1" value="4" />
+          </label>
+        </div>
+        <label class="field" style="margin-top: 12px">
+          问题
+          <textarea id="question" placeholder="例如：合同付款节点是什么？"></textarea>
+        </label>
+        <label class="field" style="margin-top: 12px">
+          历史对话（JSON，可选）
+          <textarea
+            id="history"
+            placeholder='[{"role":"user","content":"合同付款节点是什么？"},{"role":"assistant","content":"分三期支付..."}]'
+          ></textarea>
+        </label>
+        <div class="row" style="margin-top: 12px">
+          <button id="askBtn">普通问答</button>
+          <button id="streamBtn" class="secondary">流式问答</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3) 回答结果</h2>
+        <pre id="answerResult"></pre>
+        <h2 style="margin-top: 14px">来源引用</h2>
+        <ul id="sourceList"></ul>
+      </div>
+    </div>
+
+    <script>
+      const ingestBtn = document.getElementById("ingestBtn");
+      const askBtn = document.getElementById("askBtn");
+      const streamBtn = document.getElementById("streamBtn");
+
+      const ingestResult = document.getElementById("ingestResult");
+      const answerResult = document.getElementById("answerResult");
+      const sourceList = document.getElementById("sourceList");
+
+      function setBusy(busy) {
+        ingestBtn.disabled = busy;
+        askBtn.disabled = busy;
+        streamBtn.disabled = busy;
+      }
+
+      function renderSources(sources) {
+        sourceList.innerHTML = "";
+        if (!sources || sources.length === 0) {
+          const li = document.createElement("li");
+          li.textContent = "暂无来源";
+          sourceList.appendChild(li);
+          return;
+        }
+        sources.forEach((src) => {
+          const li = document.createElement("li");
+          li.textContent = src;
+          sourceList.appendChild(li);
+        });
+      }
+
+      function parseHistory() {
+        const raw = document.getElementById("history").value.trim();
+        if (!raw) return [];
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) throw new Error("chat_history 必须是数组");
+          return parsed;
+        } catch (err) {
+          throw new Error("历史对话 JSON 格式不正确：" + err.message);
+        }
+      }
+
+      ingestBtn.addEventListener("click", async () => {
+        setBusy(true);
+        ingestResult.textContent = "建库中，请稍候...";
+        try {
+          const payload = {
+            docs_dir: document.getElementById("docsDir").value.trim(),
+            store_type: document.getElementById("ingestStoreType").value,
+          };
+          const res = await fetch("/ingest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "建库失败");
+          ingestResult.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          ingestResult.textContent = "错误：" + err.message;
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      askBtn.addEventListener("click", async () => {
+        setBusy(true);
+        answerResult.textContent = "正在生成答案...";
+        renderSources([]);
+        try {
+          const payload = {
+            question: document.getElementById("question").value.trim(),
+            store_type: document.getElementById("askStoreType").value,
+            top_k: Number(document.getElementById("topK").value || 4),
+            chat_history: parseHistory(),
+          };
+          if (!payload.question) throw new Error("请输入问题");
+
+          const res = await fetch("/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "问答失败");
+
+          answerResult.textContent = data.answer || "";
+          renderSources(data.sources || []);
+        } catch (err) {
+          answerResult.textContent = "错误：" + err.message;
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      streamBtn.addEventListener("click", async () => {
+        setBusy(true);
+        answerResult.textContent = "";
+        renderSources([]);
+        try {
+          const payload = {
+            question: document.getElementById("question").value.trim(),
+            store_type: document.getElementById("askStoreType").value,
+            top_k: Number(document.getElementById("topK").value || 4),
+            chat_history: parseHistory(),
+          };
+          if (!payload.question) throw new Error("请输入问题");
+
+          const res = await fetch("/ask_stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || "流式问答失败");
+          }
+          if (!res.body) throw new Error("浏览器不支持流式响应");
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split("\n\n");
+            buffer = events.pop() || "";
+
+            for (const eventText of events) {
+              const line = eventText
+                .split("\n")
+                .find((row) => row.startsWith("data: "));
+              if (!line) continue;
+
+              const jsonText = line.slice(6);
+              const evt = JSON.parse(jsonText);
+              if (evt.type === "token") {
+                answerResult.textContent += evt.text || "";
+              } else if (evt.type === "done") {
+                if (evt.answer) answerResult.textContent = evt.answer;
+                renderSources(evt.sources || []);
+              }
+            }
+          }
+        } catch (err) {
+          answerResult.textContent = "错误：" + err.message;
+        } finally {
+          setBusy(false);
+        }
+      });
+    </script>
+  </body>
+</html>
