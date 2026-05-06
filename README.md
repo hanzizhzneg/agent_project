@@ -10,15 +10,15 @@
 
 在普通 RAG 基础上做成了 Agentic RAG：
 
-技术栈：FastAPI + LangGraph 编排 + LangChain 检索 + Ollama 本地大模型与嵌入（适合内网）。
+技术栈：FastAPI + LangGraph 编排 + LangChain 检索 + Ollama 本地大模型与嵌入。
 
-流程特点：检索后会评估相关性；不够相关时会自动改写查询并重试，最多多轮（如 README 写的约 3 轮）再给出答案。
+流程特点：检索后会评估相关性；不够相关时会自动改写查询并重试，重复多轮再给出答案。
 
-向量库：支持 Chroma 或 FAISS，文档切块后写入 VECTOR_DB_DIR（默认 ./vector_db）。
+向量库：支持 Chroma 或 FAISS，文档切块后写入 VECTOR_DB_DIR。
 
-知识来源：从 KNOWLEDGE_BASE_DIR（默认 ./knowledge_base）读文档；也支持 上传 PDF/Word 即入库。
+知识来源：从 KNOWLEDGE_BASE_DIR读文档；也支持 上传 PDF/Word 即入库。
 
-对外能力：提供/ingest、/upload_and_ingest、/ingest_async（大批量异步 + 任务查询）、/ask 等接口；带 API Key 鉴权可选；另有 GET/聊天式页面和GET/测试页说明里的/test。
+对外能力：提供/ingest、/upload_and_ingest、/ingest_async、/ask 等接口；带 API Key 鉴权可选；另有 GET/聊天式页面和GET/测试页说明里的/test。
 
 目前缺点：
 
