@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enterprise QA Test Console</title>
+  <style>
+    body{margin:0;background:#0b1020;color:#e5e7eb;font-family:Consolas,"Segoe UI",monospace}
+    .wrap{max-width:1080px;margin:20px auto;padding:0 14px}
+    .panel{background:#101828;border:1px solid #243145;border-radius:12px;padding:14px;margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    input,textarea,select,button{width:100%;padding:9px 10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-family:inherit}
+    textarea{min-height:100px} button{border:none;cursor:pointer;background:#1d4ed8;margin-top:6px}
+    .log{white-space:pre-wrap;background:#020617;border:1px solid #334155;border-radius:10px;min-height:160px;padding:10px;font-size:12px;line-height:1.55}
+    @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2>API Test Console</h2>
+      <div class="grid">
+        <input id="apiKey" placeholder="X-API-Key" />
+        <input id="requestId" placeholder="X-Request-Id（可选）" />
+      </div>
+    </div>
+    <div class="panel"><div class="grid"><button id="healthBtn">GET /health</button><button id="readyBtn">GET /ready</button></div></div>
+    <div class="panel">
+      <h3>POST /ingest</h3>
+      <div class="grid"><input id="docsDir" value="./knowledge_base" /><select id="ingestStoreType"><option value="chroma">chroma</option><option value="faiss">faiss</option></select></div>
+      <div class="grid"><input id="chunkSize" type="number" value="800" /><input id="chunkOverlap" type="number" value="120" /></div>
+      <button id="ingestBtn">执行 ingest</button>
+    </div>
+    <div class="panel">
+      <h3>POST /upload_and_ingest</h3>
+      <input id="uploadFiles" type="file" multiple accept=".pdf,.docx,.doc" />
+      <button id="uploadIngestBtn">上传并入库</button>
+    </div>
+    <div class="panel">
+      <h3>POST /ask</h3>
+      <textarea id="question">公司采购审批流程是什么？</textarea>
+      <div class="grid"><select id="askStoreType"><option value="chroma">chroma</option><option value="faiss">faiss</option></select><input id="topK" type="number" value="4" min="1" max="10" /></div>
+      <div class="grid"><input id="maxIterations" type="number" value="3" min="1" max="3" /><div></div></div>
+      <button id="askBtn">执行 ask</button>
+    </div>
+    <div class="panel"><h3>响应日志</h3><div id="log" class="log"></div></div>
+  </div>
+  <script>
+    const logEl=document.getElementById("log");
+    function log(txt){logEl.textContent=`[${new Date().toLocaleTimeString()}] ${txt}\n`+logEl.textContent;}
+    function headers(json=true){const h={}; if(json) h["Content-Type"]="application/json"; const k=document.getElementById("apiKey").value.trim(); const r=document.getElementById("requestId").value.trim(); if(k) h["X-API-Key"]=k; if(r) h["X-Request-Id"]=r; return h;}
+    async function callApi(path,method,body){const resp=await fetch(path,{method,headers:headers(true),body:body?JSON.stringify(body):undefined}); const data=await resp.json().catch(()=>({})); log(`${method} ${path} -> ${resp.status}\n${JSON.stringify(data,null,2)}`);}
+    async function callUpload(){const files=document.getElementById("uploadFiles").files; if(!files||files.length===0){log("请选择文件后再上传"); return;} const form=new FormData(); for(const f of files) form.append("files",f); form.append("store_type",document.getElementById("ingestStoreType").value); form.append("chunk_size",String(Number(document.getElementById("chunkSize").value))); form.append("chunk_overlap",String(Number(document.getElementById("chunkOverlap").value))); const resp=await fetch("/upload_and_ingest",{method:"POST",headers:headers(false),body:form}); const data=await resp.json().catch(()=>({})); log(`POST /upload_and_ingest -> ${resp.status}\n${JSON.stringify(data,null,2)}`);}
+    document.getElementById("healthBtn").onclick=()=>callApi("/health","GET");
+    document.getElementById("readyBtn").onclick=()=>callApi("/ready","GET");
+    document.getElementById("ingestBtn").onclick=()=>callApi("/ingest","POST",{docs_dir:document.getElementById("docsDir").value.trim(),store_type:document.getElementById("ingestStoreType").value,chunk_size:Number(document.getElementById("chunkSize").value),chunk_overlap:Number(document.getElementById("chunkOverlap").value)});
+    document.getElementById("uploadIngestBtn").onclick=()=>callUpload();
+    document.getElementById("askBtn").onclick=()=>callApi("/ask","POST",{question:document.getElementById("question").value.trim(),store_type:document.getElementById("askStoreType").value,top_k:Number(document.getElementById("topK").value),max_iterations:Number(document.getElementById("maxIterations").value)});
+    log("Test console ready.");
+  </script>
+</body>
+</html>

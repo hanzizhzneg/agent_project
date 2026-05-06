@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enterprise QA Chat</title>
+  <style>
+    :root { --bg:#f8fafc; --line:#e2e8f0; --muted:#64748b; --text:#0f172a; --user:#1d4ed8; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); height:100vh; overflow:hidden; }
+    .layout { display:grid; grid-template-columns:300px 1fr; height:100vh; }
+    .sidebar { border-right:1px solid var(--line); background:#fff; padding:16px; overflow:auto; }
+    .brand { font-size:18px; font-weight:700; margin-bottom:6px; }
+    .desc { font-size:13px; color:var(--muted); margin-bottom:12px; line-height:1.5; }
+    .group { margin-bottom:10px; }
+    .group label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+    .group input, .group select, .group textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:9px 10px; font-size:13px; }
+    button { width:100%; border:none; border-radius:10px; padding:9px 10px; color:#fff; background:#1d4ed8; cursor:pointer; margin-top:6px; }
+    button.secondary { background:#0f172a; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+    .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+    .chat { display:grid; grid-template-rows:1fr auto; height:100vh; }
+    .messages { overflow:auto; padding:22px 0; }
+    .row { max-width:900px; margin:0 auto 16px; padding:0 18px; display:flex; }
+    .row.user { justify-content:flex-end; }
+    .bubble { max-width:80%; border:1px solid var(--line); background:#fff; border-radius:14px; padding:11px 13px; white-space:pre-wrap; line-height:1.6; font-size:14px; }
+    .row.user .bubble { background:var(--user); border:none; color:#fff; }
+    .meta { font-size:12px; color:var(--muted); margin-top:6px; white-space:pre-wrap; }
+    .composer { border-top:1px solid var(--line); background:#fff; padding:12px 14px; }
+    .composer-inner { max-width:900px; margin:0 auto; border:1px solid var(--line); border-radius:14px; padding:10px; }
+    .composer textarea { width:100%; border:none; resize:none; outline:none; min-height:56px; max-height:180px; font-size:15px; }
+    .actions { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+    .status { font-size:12px; color:var(--muted); }
+    .send { width:auto; margin:0; padding:8px 14px; }
+    @media (max-width:980px){ .layout{grid-template-columns:1fr;} .sidebar{display:none;} .bubble{max-width:88%;} }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">Enterprise QA Chat</div>
+      <div class="desc">ChatGPT 风格主页，支持 Agentic RAG、生成向量库、上传即入库。</div>
+      <div class="group"><label>API Key</label><input id="apiKey" placeholder="X-API-Key" /></div>
+      <div class="group"><label>向量库</label><select id="storeType"><option value="chroma">chroma</option><option value="faiss">faiss</option></select></div>
+      <div class="group"><label>Top K</label><input id="topK" type="number" min="1" max="10" value="4" /></div>
+      <div class="group"><label>最大迭代轮次</label><input id="maxIterations" type="number" min="1" max="3" value="3" /></div>
+      <div class="group"><label>入库目录</label><input id="docsDir" value="./knowledge_base" /></div>
+      <div class="group"><label>Chunk Size</label><input id="chunkSize" type="number" min="200" max="2000" value="800" /></div>
+      <div class="group"><label>Chunk Overlap</label><input id="chunkOverlap" type="number" min="0" max="400" value="120" /></div>
+      <button id="ingestBtn" class="secondary">生成向量库（Ingest）</button>
+      <button id="ingestAsyncBtn" class="secondary">异步入库（推荐大批量）</button>
+      <div class="group" style="margin-top:10px;"><label>上传文件后入库（PDF/DOCX/DOC）</label><input id="uploadFiles" type="file" multiple accept=".pdf,.docx,.doc" /></div>
+      <button id="uploadIngestBtn" class="secondary">上传并立即入库</button>
+      <div class="hint">提示：Enter 发送，Shift+Enter 换行。</div>
+    </aside>
+    <main class="chat">
+      <section id="messages" class="messages"></section>
+      <section class="composer">
+        <div class="composer-inner">
+          <textarea id="input" placeholder="输入你的问题..."></textarea>
+          <div class="actions"><div id="status" class="status">就绪</div><button id="sendBtn" class="send">发送</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const messagesEl = document.getElementById("messages");
+    const inputEl = document.getElementById("input");
+    const statusEl = document.getElementById("status");
+    const sendBtn = document.getElementById("sendBtn");
+    const ingestBtn = document.getElementById("ingestBtn");
+    const ingestAsyncBtn = document.getElementById("ingestAsyncBtn");
+    const uploadIngestBtn = document.getElementById("uploadIngestBtn");
+    function setStatus(t){ statusEl.textContent=t; }
+    function addMessage(role,text,meta=""){ const row=document.createElement("div"); row.className=`row ${role}`; const bubble=document.createElement("div"); bubble.className="bubble"; bubble.textContent=text; if(meta){ const m=document.createElement("div"); m.className="meta"; m.textContent=meta; bubble.appendChild(m);} row.appendChild(bubble); messagesEl.appendChild(row); messagesEl.scrollTop=messagesEl.scrollHeight; return bubble; }
+    function buildMeta(data){ const trace=(data.trace||[]).map(t=>`第${t.iteration}轮 | ${t.relevance_decision}\nquery: ${t.query}`).join("\n"); const src=(data.sources||[]).map(s=>`${s.source} (page: ${s.page})`).join("\n"); return `迭代: ${data.iterations_used}\n最终查询: ${data.final_query}\n\n轨迹:\n${trace||"无"}\n\n来源:\n${src||"无"}`; }
+    async function askQuestion(){
+      const question=inputEl.value.trim(); if(!question) return;
+      const apiKey=document.getElementById("apiKey").value.trim();
+      const storeType=document.getElementById("storeType").value;
+      const topK=Number(document.getElementById("topK").value);
+      const maxIterations=Number(document.getElementById("maxIterations").value);
+      addMessage("user",question); inputEl.value=""; setStatus("思考中..."); sendBtn.disabled=true;
+      const pending=addMessage("assistant","正在检索并生成答案，请稍候...");
+      try{
+        const resp=await fetch("/ask",{method:"POST",headers:{"Content-Type":"application/json","X-API-Key":apiKey},body:JSON.stringify({question,store_type:storeType,top_k:topK,max_iterations:maxIterations})});
+        const data=await resp.json(); if(!resp.ok) throw new Error(data.detail||JSON.stringify(data));
+        pending.textContent=data.answer||"无答案"; const m=document.createElement("div"); m.className="meta"; m.textContent=buildMeta(data); pending.appendChild(m); setStatus("完成");
+      }catch(err){ pending.textContent="请求失败："+err.message; setStatus("失败"); } finally { sendBtn.disabled=false; inputEl.focus(); }
+    }
+    async function ingestDocs(){
+      const apiKey=document.getElementById("apiKey").value.trim();
+      const storeType=document.getElementById("storeType").value;
+      const docsDir=document.getElementById("docsDir").value.trim();
+      const chunkSize=Number(document.getElementById("chunkSize").value);
+      const chunkOverlap=Number(document.getElementById("chunkOverlap").value);
+      ingestBtn.disabled=true; setStatus("入库中..."); addMessage("assistant","开始执行 ingest，请稍候...");
+      try{
+        const resp=await fetch("/ingest",{method:"POST",headers:{"Content-Type":"application/json","X-API-Key":apiKey},body:JSON.stringify({docs_dir:docsDir,store_type:storeType,chunk_size:chunkSize,chunk_overlap:chunkOverlap})});
+        const data=await resp.json(); if(!resp.ok) throw new Error(data.detail||JSON.stringify(data));
+        addMessage("assistant","向量库生成完成。",`store_type: ${data.store_type}\ndocs_count: ${data.docs_count}\nchunks_count: ${data.chunks_count}`); setStatus("入库完成");
+      }catch(err){ addMessage("assistant","Ingest 失败："+err.message); setStatus("入库失败"); } finally { ingestBtn.disabled=false; }
+    }
+    async function uploadAndIngest(){
+      const apiKey=document.getElementById("apiKey").value.trim();
+      const storeType=document.getElementById("storeType").value;
+      const chunkSize=Number(document.getElementById("chunkSize").value);
+      const chunkOverlap=Number(document.getElementById("chunkOverlap").value);
+      const files=document.getElementById("uploadFiles").files;
+      if(!files||files.length===0){ addMessage("assistant","请先选择至少一个文件再上传。"); return; }
+      uploadIngestBtn.disabled=true; setStatus("上传并入库中..."); addMessage("assistant",`开始上传 ${files.length} 个文件并执行 ingest，请稍候...`);
+      const formData=new FormData(); for(const file of files){ formData.append("files",file); } formData.append("store_type",storeType); formData.append("chunk_size",String(chunkSize)); formData.append("chunk_overlap",String(chunkOverlap));
+      try{
+        const resp=await fetch("/upload_and_ingest",{method:"POST",headers:{"X-API-Key":apiKey},body:formData});
+        const data=await resp.json(); if(!resp.ok) throw new Error(data.detail||JSON.stringify(data));
+        addMessage("assistant","上传并入库完成。",`store_type: ${data.store_type}\ndocs_count: ${data.docs_count}\nchunks_count: ${data.chunks_count}`); setStatus("上传入库完成");
+      }catch(err){ addMessage("assistant","上传入库失败："+err.message); setStatus("上传入库失败"); } finally { uploadIngestBtn.disabled=false; }
+    }
+
+    async function pollIngestTask(taskId, apiKey){
+      let done = false;
+      while(!done){
+        await new Promise(r => setTimeout(r, 1500));
+        const resp = await fetch(`/ingest_tasks/${taskId}`, {
+          method: "GET",
+          headers: {"X-API-Key": apiKey}
+        });
+        const data = await resp.json();
+        if(!resp.ok){
+          addMessage("assistant", "查询异步任务失败：" + (data.detail || JSON.stringify(data)));
+          setStatus("异步任务查询失败");
+          return;
+        }
+        setStatus(`异步入库中... ${data.progress}%`);
+        if(data.status === "completed"){
+          const r = data.result || {};
+          addMessage(
+            "assistant",
+            "异步入库完成。",
+            `task_id: ${data.task_id}\nprogress: ${data.progress}%\nstore_type: ${r.store_type}\ndocs_count: ${r.docs_count}\nchunks_count: ${r.chunks_count}`
+          );
+          setStatus("异步入库完成");
+          done = true;
+        } else if (data.status === "failed"){
+          addMessage(
+            "assistant",
+            "异步入库失败。",
+            `task_id: ${data.task_id}\nstage: ${data.stage}\ndetail: ${data.detail}`
+          );
+          setStatus("异步入库失败");
+          done = true;
+        }
+      }
+    }
+
+    async function ingestDocsAsync(){
+      const apiKey=document.getElementById("apiKey").value.trim();
+      const storeType=document.getElementById("storeType").value;
+      const docsDir=document.getElementById("docsDir").value.trim();
+      const chunkSize=Number(document.getElementById("chunkSize").value);
+      const chunkOverlap=Number(document.getElementById("chunkOverlap").value);
+      ingestAsyncBtn.disabled=true;
+      setStatus("提交异步任务中...");
+      addMessage("assistant","正在提交异步入库任务...");
+      try{
+        const resp=await fetch("/ingest_async",{method:"POST",headers:{"Content-Type":"application/json","X-API-Key":apiKey},body:JSON.stringify({docs_dir:docsDir,store_type:storeType,chunk_size:chunkSize,chunk_overlap:chunkOverlap})});
+        const data=await resp.json();
+        if(!resp.ok) throw new Error(data.detail||JSON.stringify(data));
+        addMessage("assistant","异步任务已创建。",`task_id: ${data.task_id}\nstatus: ${data.status}`);
+        await pollIngestTask(data.task_id, apiKey);
+      }catch(err){
+        addMessage("assistant","异步入库启动失败："+err.message);
+        setStatus("异步入库启动失败");
+      }finally{
+        ingestAsyncBtn.disabled=false;
+      }
+    }
+
+    sendBtn.addEventListener("click",askQuestion);
+    ingestBtn.addEventListener("click",ingestDocs);
+    ingestAsyncBtn.addEventListener("click",ingestDocsAsync);
+    uploadIngestBtn.addEventListener("click",uploadAndIngest);
+    inputEl.addEventListener("keydown",(e)=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); askQuestion(); }});
+    addMessage("assistant","你好，我是企业知识库助手。请先入库或上传文档，然后开始提问。");
+  </script>
+</body>
+</html>
